@@ -116,6 +116,7 @@ export interface RpcMethodMap {
 export type RpcMethodName = keyof RpcMethodMap;
 
 export interface ExtensionMethodMap extends RpcMethodMap {
+  openExternal: { params: { url: string }; result: { ok: boolean } };
   createSkill: { params: { prompt: string }; result: { ok: boolean } };
   generateSkillContent: { params: Record<string, unknown>; result: { content: string; filename: string } };
   generateLearningQuiz: { params: Record<string, unknown>; result: { questions: unknown[] } };
