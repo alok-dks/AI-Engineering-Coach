@@ -94,6 +94,37 @@ export function createCanvasHost(options: CanvasHostOptions): CanvasHost {
     res.end(JSON.stringify(body));
   }
 
+  function sendStatus(res: ServerResponse, statusCode: number, message: string): void {
+    res.writeHead(statusCode, { 'Content-Type': 'text/plain' });
+    res.end(message);
+  }
+
+  function isJsonRpcRequest(req: IncomingMessage): boolean {
+    const contentType = req.headers['content-type'];
+    return typeof contentType === 'string' && contentType.split(';', 1)[0].trim().toLowerCase() === 'application/json';
+  }
+
+  function isAllowedRpcOrigin(req: IncomingMessage): boolean {
+    const host = req.headers.host;
+    if (typeof host !== 'string') return false;
+    let hostUrl: URL;
+    try {
+      hostUrl = new URL(`http://${host}`);
+    } catch {
+      return false;
+    }
+    if (hostUrl.hostname !== '127.0.0.1') return false;
+
+    const origin = req.headers.origin;
+    if (origin === undefined) return true;
+    if (typeof origin !== 'string') return false;
+    try {
+      return new URL(origin).host === hostUrl.host;
+    } catch {
+      return false;
+    }
+  }
+
   function dispatchRpc(method: string, params: Record<string, unknown>): unknown {
     if (method === 'getCapabilities') return { host: 'canvas', llm: false };
     if (method in HOST_STUBS) return HOST_STUBS[method]();
@@ -107,6 +138,15 @@ export function createCanvasHost(options: CanvasHostOptions): CanvasHost {
   }
 
   function handleRpc(req: IncomingMessage, res: ServerResponse): void {
+    if (!isJsonRpcRequest(req)) {
+      sendStatus(res, 415, 'Unsupported Media Type');
+      return;
+    }
+    if (!isAllowedRpcOrigin(req)) {
+      sendStatus(res, 403, 'Forbidden');
+      return;
+    }
+
     const chunks: Buffer[] = [];
     req.on('data', (c: Buffer) => chunks.push(c));
     req.on('end', () => {
