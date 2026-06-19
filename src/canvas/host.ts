@@ -265,7 +265,14 @@ postMessage:function(msg){
 if(!msg||msg.type!=='request')return;
 if(msg.method==='openExternal'){
 var url=msg.params&&msg.params.url;
-try{if(url)window.open(url,'_blank','noopener');}catch(e){}
+try{
+if(typeof url==='string'&&url.toLowerCase().startsWith('https://')){
+var safe=true;
+for(var i=0;i<url.length;i++){var code=url.charCodeAt(i);if(code<=31||code===127){safe=false;break;}}
+var parsed=safe&&new URL(url);
+if(parsed&&parsed.protocol==='https:'&&parsed.hostname&&!parsed.username&&!parsed.password)window.open(parsed.href,'_blank','noopener');
+}
+}catch(e){}
 dispatch({type:'response',id:msg.id,data:{ok:true}});
 return;
 }
