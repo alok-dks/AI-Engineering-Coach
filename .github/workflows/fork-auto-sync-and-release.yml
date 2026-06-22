@@ -1,0 +1,81 @@
+name: Fork Auto Sync + Release
+
+on:
+  schedule:
+    # Every 30 minutes
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-auto-sync-and-release
+  cancel-in-progress: false
+
+jobs:
+  sync-and-tag:
+    # Safety: only run this automation in fork repositories.
+    if: ${{ github.event.repository.fork }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout fork default branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync main from parent repo
+        id: sync
+        env:
+          PARENT_REPO: ${{ github.event.repository.parent.full_name }}
+        run: |
+          if [ -z "$PARENT_REPO" ] || [ "$PARENT_REPO" = "null" ]; then
+            echo "Unable to determine parent repository from event payload."
+            exit 1
+          fi
+
+          git checkout main
+          git fetch origin main --tags
+          BEFORE_SHA="$(git rev-parse origin/main)"
+
+          git remote add upstream "https://github.com/${PARENT_REPO}.git"
+          git fetch upstream main --tags
+          UPSTREAM_SHA="$(git rev-parse upstream/main)"
+
+          if [ "$BEFORE_SHA" = "$UPSTREAM_SHA" ]; then
+            echo "Fork main is already up to date with upstream/main."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git reset --hard "$UPSTREAM_SHA"
+          git push origin main --force-with-lease=main:"$BEFORE_SHA"
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "upstream_sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        if: ${{ steps.sync.outputs.changed == 'true' }}
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+
+      - name: Create version tag to trigger release workflow
+        if: ${{ steps.sync.outputs.changed == 'true' }}
+        run: |
+          TAG="v$(node -p "require('./package.json').version")"
+
+          if git ls-remote --tags origin | grep -q "refs/tags/${TAG}$"; then
+            echo "Tag ${TAG} already exists on origin; skipping tag push."
+            exit 0
+          fi
+
+          TARGET_SHA="${{ steps.sync.outputs.upstream_sha }}"
+          git tag "${TAG}" "${TARGET_SHA}"
+          git push origin "${TAG}"
